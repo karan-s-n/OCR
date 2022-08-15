@@ -289,7 +289,6 @@ class Prediction(ImagePreprocessing):
     super().__init__()
     self.image_path = image_path
     print("\nSTEP1: LOADING PREDICTION DATASET")
-    self.model = keras.models.load_model(pretrained_path+'iamdatasetmodel.pth')
     self.prediction_model = keras.models.Model(self.model.get_layer(name="image").input, self.model.get_layer(name="dense2").output)
     self.max_len = 30
     with open(image_path+"characters.txt","r") as f:
@@ -341,8 +340,8 @@ class Prediction(ImagePreprocessing):
         
 if __name__ == '__main__':
   dl = ew.CropImages()
-  weights_path = dl.project_path+"PretrainedModels/"
-  base_path = dl.project_path+"imagedata/predict_images/"
+  weights_path = dl.iam_dataset_path
+  base_path = dl.predict_images
   
   
   pretrained_model = dl.pretrained
