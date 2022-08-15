@@ -1,1 +1,22 @@
 
+trained_model : PretrainedModels/craft_mlt_25k.pth
+text_threshold : 0.7
+low_text : 0.4
+link_threshold : 0.4
+cuda : False
+canvas_size : 1280
+mag_ratio : 1.5
+epochs : 5
+pretrained : True
+poly : False
+show_time : False
+test_folder : imagedata/predict_images/raw_images/
+report_folder : imagedata/predict_images/raw_images/reports/
+data_limit : 10
+refine : False
+dataset : imagedata/predict_images/raw_images/reports/dataset.csv
+wordspath : imagedata/predict_images/raw_images/words/
+weigtht_path :  /content/drive/MyDrive/HandWrittenTextDetector/PretrainedModels/
+train_data_path : imagedata/
+project_path : /content/drive/.shortcut-targets-by-id/1PaYzfOUJohAFar5CqYn4onXeck8E_9xD/HandWrittenTextDetector/
+crop_words : False 
