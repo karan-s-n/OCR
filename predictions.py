@@ -289,6 +289,7 @@ class Prediction(ImagePreprocessing):
     super().__init__()
     self.image_path = image_path
     print("\nSTEP1: LOADING PREDICTION DATASET")
+    self.model = keras.models.load_model(pretrained_path)
     self.prediction_model = keras.models.Model(self.model.get_layer(name="image").input, self.model.get_layer(name="dense2").output)
     self.max_len = 30
     with open(image_path+"characters.txt","r") as f:
