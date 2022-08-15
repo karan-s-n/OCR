@@ -7,5 +7,5 @@
 5. provide dataset path during train_dataset parameter in config.yaml file
 
 #download pretrained dataset
-1. craft_mlt_25k.pth - used for line and word segmentation 
-2. iamdataset.pth - is trained and used for text detection 
+1. craft_mlt_25k.pth - used for line and word segmentation - https://drive.google.com/uc?authuser=0&id=1Jk4eGD7crsqCCg9C9VjCLkMN3ze8kutZ&export=download
+2. iamdataset.pth - is trained and used for text detection - 
