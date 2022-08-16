@@ -20,7 +20,7 @@ class CropImages:
     self.crop_words = self.config["crop_words"]
     self.train_data_path = self.config["train_data_path"]
     self.iam_dataset_path = self.config["iam_dataset_path"]
-    self.predict_images = self.config["predict_images"]
+    self.predict_images = self.config["test_folder"]
 
   def set_attrib(self):
     pass

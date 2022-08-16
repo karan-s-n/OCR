@@ -23,7 +23,7 @@ def fetch_data(cur,table):
 
 if __name__ == '__main__':
   conn,cur = connect('ocr_db')
-  dataframe = get_dataset("datasets/predict_images/raw_images/reports/dataset.csv",conn,"rawdata")
+  dataframe = get_dataset("/content/drive/MyDrive/datasets/predict_images/raw_images/reports/dataset.csv",conn,"rawdata")
   create_load(cur,conn,"rawdata")
   fetch_data(cur,"rawdata")
 

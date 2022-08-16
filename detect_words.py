@@ -62,7 +62,7 @@ class Configuration:
     self.report_folder = self.config["report_folder"]
     self.data_limit = self.config["data_limit"]
     self.iam_dataset_path = self.config["iam_dataset_path"]
-    self.predict_images = self.config["predict_images"]
+    # self.predict_images = self.config["predict_images"]
   
 
 args = Configuration()

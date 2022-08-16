@@ -1,6 +1,6 @@
 
 trained_model : /content/drive/MyDrive/pretrainedmodels/craft_mlt_25k.pth
-iam_dataset_path: /content/drive/MyDrive/pretrainedmodels/craft_mlt_25k.pth
+iam_dataset_path: /content/drive/MyDrive/pretrainedmodels/iamdatasetmodel.pth
 text_threshold : 0.7
 low_text : 0.4
 link_threshold : 0.4
@@ -20,4 +20,4 @@ wordspath : /content/drive/MyDrive/datasets/predict_images/raw_images/words/
 weigtht_path :  /content/drive/MyDrive/pretrainedmodels/
 train_data_path : /content/drive/MyDrive/datasets/
 project_path : ./
-crop_words : True
+crop_words : False
