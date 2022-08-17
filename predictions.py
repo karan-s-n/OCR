@@ -355,6 +355,8 @@ if __name__ == '__main__':
       dl.load_csv()
       dl.get_word_img()
       pred.dataset = dl.load_csv()
+      pred.predict_images()
+      pred.dataset.to_csv(dl.datasetpath,index=False)
     else:
       pred.dataset = dl.load_csv()
       pred.predict_images()
