@@ -4,6 +4,7 @@ import cv2
 import tensorflow as tf
 
 def loadImage(img_file):
+    print(img_file)
     img = io.imread(img_file)           # RGB order
     if img.shape[0] == 2: img = img[0]
     if len(img.shape) == 2 : img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
