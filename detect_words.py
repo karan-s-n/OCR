@@ -88,15 +88,6 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
     score_text = y[0,:,:,0].cpu().data.numpy()
     score_link = y[0,:,:,1].cpu().data.numpy()
 
-    
-    
-
-    # refine link
-    if refine_net is not None:
-        with torch.no_grad():
-            y_refiner = refine_net(y, feature)
-        score_link = y_refiner[0,:,:,0].cpu().data.numpy()
-
     t0 = time.time() - t0
     t1 = time.time()
 
@@ -123,7 +114,6 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
 if __name__ == '__main__':
     # load net
     net = CRAFT()     # initialize
-    refine_net = None
 
     print('Loading weights from checkpoint (' + args.trained_model + ')')
     if args.cuda:
@@ -142,7 +132,7 @@ if __name__ == '__main__':
     dataset = pd.DataFrame()
     for k, image_path in enumerate(image_list):
         image = im.loadImage(image_path)
-        bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, args.cuda, args.poly, refine_net)
+        bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, args.cuda, args.poly)
         # save score text
         filename, file_ext = os.path.splitext(os.path.basename(image_path))
         mask_file = result_folder + "/res_" + filename + '_mask.jpg'
