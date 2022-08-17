@@ -73,13 +73,6 @@ class vgg16_bn(torch.nn.Module):
         out = vgg_outputs(h_fc7, h_relu5_3, h_relu4_3, h_relu3_2, h_relu2_2)
         return out
 
-"""  
-Copyright (c) 2019-present NAVER Corp.
-MIT License
-"""
-
-
-
 class double_conv(nn.Module):
     def __init__(self, in_ch, mid_ch, out_ch):
         super(double_conv, self).__init__()
