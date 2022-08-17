@@ -20,4 +20,4 @@ wordspath : /content/drive/MyDrive/datasets/predict_images/raw_images/words/
 weigtht_path :  /content/drive/MyDrive/pretrainedmodels/
 train_data_path : /content/drive/MyDrive/datasets/
 project_path : ./
-crop_words : False
+crop_words : True
