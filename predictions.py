@@ -4,12 +4,9 @@ import matplotlib.pyplot as plt
 import os
 from glob import glob
 import numpy as np
-import utils.DatasetLoader as DL
-from utils import utils as ut
+import utils as ut
 import pandas as pd
 from tensorflow.keras.layers.experimental.preprocessing import StringLookup
-import imp
-import extract_words as ew
 
 np.random.seed(42)
 tf.random.set_seed(42)
@@ -117,27 +114,31 @@ self.process_images_labels, num_parallel_calls=self.AUTOTUNE
 
 
 
-
 class OCRModel(ImagePreprocessing):
-  def __init__(self,base_path):
+  def __init__(self,training_path):
     print("###STEP1: DATA LOADING")
     super().__init__()
-    self.base_path = base_path+"words/"
-    self.base_image_path = os.path.join(self.base_path , "words")
-    self.dataprep = DL.DataLoad(base_path)
+    self.base_path = training_path
+    self.base_image_path = os.path.join(self.base_path , "IAM_Words","data","words")
+    self.mnist_path = os.path.join(self.base_path , "mnist_Words","labels.json")
+    if dl.untar_iamdataset:
+        ut.extract_iamdataset_file(self.base_image_path+"/words.tgz",extract_path=self.base_image_path)
+    self.dataprep = ut.DataLoad(self.base_path)
     self.dataprep.get_word_list()
     self.train_labels_cleaned = []
     self.characters = set()
-    self.max_len = 0 
-    #split of data into train , test , valid
+    self.max_len = 0
+    self.mnist_paths,self.mnist_labels = ut.get_mnist_dataset(self.mnist_path)
     self.train_data , self.test_data,self.valid_data = self.dataprep.train_valid_test_split()
 
   def prepare_data(self):
       print("##STEP2: DATA SPLITING")
       #get images path and labels 
-      self.tr_images, self.tr_labels = ut.get_image_paths_and_labels(self.train_data,self.base_path)
-      self.valid_images,self.valid_labels = ut.get_image_paths_and_labels(self.test_data,self.base_path)
-      self.test_images, self.test_labels = ut.get_image_paths_and_labels(self.valid_data,self.base_path)
+      self.tr_images, self.tr_labels = ut.get_image_paths_and_labels(self.train_data,self.base_image_path)
+      self.valid_images,self.valid_labels = ut.get_image_paths_and_labels(self.test_data,self.base_image_path)
+      self.test_images, self.test_labels = ut.get_image_paths_and_labels(self.valid_data,self.base_image_path)
+      self.tr_images.extend(self.mnist_paths)
+      self.tr_labels.extend(self.mnist_labels)
 
   
   def clean_labels(self,labels):
@@ -166,8 +167,6 @@ class OCRModel(ImagePreprocessing):
     self.characters = sorted(list(self.characters))
     with open("characters.txt","w") as f:
       f.write(",".join(self.characters))
-    print("Maximum length: ", self.max_len)
-    print("Vocab size: ", len(self.characters))
     self.char_to_num = StringLookup(vocabulary=list(self.characters), mask_token=None)
     self.num_to_char = StringLookup(vocabulary=self.char_to_num.get_vocabulary(), mask_token=None, invert=True)
 
@@ -294,9 +293,6 @@ class Prediction(ImagePreprocessing):
     self.max_len = 30
     with open(image_path+"../characters.txt","r") as f:
       characters = list(f.read())
-      print(characters)
-      #characters = list(set(characters))
-    print("No. of unique characters:",len(characters))
     AUTOTUNE = tf.data.AUTOTUNE
     self.char_to_num = StringLookup(vocabulary=list(characters), mask_token=None)
     self.num_to_char = StringLookup(
@@ -306,7 +302,6 @@ class Prediction(ImagePreprocessing):
   def load_predict(self):
     self.image_paths = []
     self.image_labels = []
-    print("IMAGEPATH : ",len(self.dataset["word_path"]))
     for label,image in enumerate(self.dataset["word_path"]):
       self.image_paths.append(image)
       self.image_labels.append(str(label))
@@ -333,22 +328,20 @@ class Prediction(ImagePreprocessing):
         preds = self.prediction_model.predict(batch_images)
         pred_texts = self.decode_batch_predictions(preds)
         pred_texts_list.extend(pred_texts)
-    print("Predicted text",len(pred_texts_list),pred_texts_list)
+    print("Predicted text",len(pred_texts_list))
     self.dataset["Prediction_Text"] = pd.Series(pred_texts_list)
     return pred_texts_list
 
             
         
 if __name__ == '__main__':
-  dl = ew.CropImages()
-  weights_path = dl.iam_dataset_path
-  base_path = dl.predict_images
-  
-  
+  dl = ut.CropImages()
   pretrained_model = dl.pretrained
   crop_words =  dl.crop_words
+  print("FETCHING MNIST DATASET")
+
   if pretrained_model:
-    print("BASE PATH:",base_path)
+    print("PREDICTION PATH:",dl.predict_images)
     pred = Prediction(pretrained_path=weights_path,image_path = base_path)
     if crop_words:
       dl.set_attrib()
@@ -362,25 +355,16 @@ if __name__ == '__main__':
       pred.predict_images()
       pred.dataset.to_csv(dl.datasetpath,index=False)
   else:
-    print("BASE PATH:",dl.train_data_path)
-    ocr = OCRModel(dl.train_data_path)
+    print("TRAINING PATH:",dl.train_images)
+
+
+    ocr = OCRModel(dl.train_images)
     ocr.prepare_data()
     ocr.data_clean()
-    
-
-    epochs = dl.epochs  # To get good results this should be at least 50
     model = ocr.build_model()
     print(model.summary())
-    prediction_model = keras.models.Model(
-      model.get_layer(name="image").input, model.get_layer(name="dense2").output
-    )
+    prediction_model = keras.models.Model(model.get_layer(name="image").input, model.get_layer(name="dense2").output)
     edit_distance_callback = EditDistanceCallback(prediction_model)
     edit_distance_callback.validation_ds = ocr.validation_ds
-    # Train the model.
-    history = model.fit(
-        ocr.train_ds,
-        epochs=epochs,
-        callbacks=[edit_distance_callback],
-    )
-    #model = ...  # Get model (Sequential, Functional Model, or Model subclass)
-    model.save('iamdatasetmodel.pth')
+    history = model.fit( ocr.train_ds, epochs=dl.epochs, callbacks=[edit_distance_callback],)
+    model.save(dl.pretrainedmodels+"iamdatasetmodel.pth")
