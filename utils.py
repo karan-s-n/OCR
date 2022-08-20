@@ -430,3 +430,28 @@ def get_mnist_dataset(path):
     mnist_dataset = mnist_dataset.reset_index()
     print(mnist_dataset.head(5))
     return mnist_dataset["image_path"].values,mnist_dataset["labels"].values
+###################### DB #############################33
+
+
+import pandas as pd
+import sqlite3
+
+def connect(dbname):
+  conn = sqlite3.connect(dbname)
+  cur = conn.cursor()
+  return conn,cur
+
+def get_dataset(path,conn,tablename):
+  df = pd.read_csv(path)
+  df.to_sql(tablename, conn, if_exists='replace', index = False)
+  return df
+
+def create_load(cur,conn,tablename):
+  cur.execute(f'CREATE TABLE IF NOT EXISTS {tablename} (imagpath text, x number,y number,w number,h number , wordpath text , predicttext text)')
+  conn.commit()
+
+def fetch_data(cur,table):
+  cur.execute(f''' SELECT * FROM {table}''')
+  for row in cur.fetchall():
+      print (row)
+      break
