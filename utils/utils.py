@@ -2,8 +2,151 @@ import numpy as np
 import cv2
 import math
 import os
+from skimage import io
+import tensorflow as tf
+import os, sys, tarfile
+import pandas as pd
+import numpy as np
+from tensorflow.keras.layers.experimental.preprocessing import StringLookup
+import tensorflow as tf
+
+import cv2
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import yaml
+from glob import glob
 from tqdm import tqdm
-from utils import imageutils
+
+
+class CropImages:
+    def __init__(self):
+        with open('config.yml', "r") as f:
+            self.config = yaml.load(f, Loader=yaml.Loader)
+        self.datasetpath = self.config["dataset"]
+        self.wordspath = self.config["wordspath"]
+        self.report_folder = self.config["report_folder"]
+        self.project_path = self.config["project_path"]
+        self.epochs = self.config["epochs"]
+        self.pretrained = self.config["pretrained"]
+        self.crop_words = self.config["crop_words"]
+        self.train_data_path = self.config["train_data_path"]
+        self.iam_dataset_path = self.config["iam_dataset_path"]
+        self.predict_images = self.config["test_folder"]
+
+    def set_attrib(self):
+        pass
+
+    def save_words(self, filename, cropped, idx):
+        dir = self.wordspath + filename + "/"
+        if os.path.isdir(os.path.join(dir)) == False:
+            os.makedirs(os.path.join(dir))
+
+        filepath = dir + f'_{idx}.jpg'
+        cv2.imwrite(filepath, cropped)
+        return filepath
+
+    def get_image(self, path):
+        filename = path.rsplit("/", 2)[-1]
+        filename = filename.split(".png")[0]
+        image = cv2.imread(path, 0)
+        return filename, image
+
+    def remove_images(self, path):
+        images = glob(path)
+        for data in images:
+            os.remove(data)
+
+    def load_csv(self):
+        self.dataset = pd.read_csv(self.datasetpath)
+        return self.dataset
+
+    def get_word_img(self):
+        for image_path in set(self.dataset["image_path"]):
+            image_boxes = self.dataset[self.dataset["image_path"] == image_path]
+            filename, image = self.get_image(image_path)
+            for idx in tqdm(image_boxes.index):
+                x, y, w, h = int(image_boxes.loc[idx, "x"]), int(image_boxes.loc[idx, "y"]), int(
+                    image_boxes.loc[idx, "w"]), int(image_boxes.loc[idx, "h"])
+                cropped_image = image[y:y + h, x:x + w].copy()
+                filepath = self.save_words(filename, cropped_image, idx)
+                self.dataset.loc[idx, "word_path"] = filepath
+        self.dataset.to_csv(self.datasetpath, index=False)
+
+
+class DataLoad:
+    def __init__(self, datapath, filter_index=[0, 1, 8]):
+        self.datapath = datapath
+
+    def get_word_list(self):
+        words_list = []
+        words = open(f"{self.datapath}/words.txt", "r").readlines()
+        for line in words:
+            if line[0] == "#":
+                continue
+            if line.split(" ")[1] != "err":  # We don't need to deal with errored entries.
+                words_list.append(line)
+            len(words_list)
+        # np.random.shuffle(words_list)
+        self.words_list = words_list
+
+    def train_valid_test_split(self):
+        words_df = self.words_list
+        # spliting 90% of data to train and 5% test and 5% validate
+        split_idx = int(0.9 * len(words_df))
+        self.train_samples = words_df[:split_idx]
+        self.test_samples = words_df[split_idx:]
+        val_split_idx = int(0.5 * len(self.test_samples))
+        self.validation_samples = self.test_samples[:val_split_idx]
+        self.test_samples = self.test_samples[val_split_idx:]
+        assert len(words_df) == len(self.train_samples) + len(self.validation_samples) + len(self.test_samples)
+        print(f"Total training samples: {len(self.train_samples)}")
+        print(f"Total validation samples: {len(self.validation_samples)}")
+        print(f"Total test samples: {len(self.test_samples)}")
+        return self.train_samples, self.test_samples, self.validation_samples
+
+
+def loadImage(file):
+    img = cv2.imread(file)
+    if img.shape[0] == 2: img = img[0]
+    if len(img.shape) == 2 : img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    if img.shape[2] == 4:   img = img[:,:,:3]
+    return np.array(img)
+
+def normalizeMeanVar(in_img, mean=(0.485, 0.456, 0.406), variance=(0.229, 0.224, 0.225)):
+    # should be RGB order
+    img = in_img.copy().astype(np.float32)
+
+    img -= np.array([mean[0] * 255.0, mean[1] * 255.0, mean[2] * 255.0], dtype=np.float32)
+    img /= np.array([variance[0] * 255.0, variance[1] * 255.0, variance[2] * 255.0], dtype=np.float32)
+    return img
+
+def resize_image(img, square_size, interpolation, mag_ratio=1):
+    height, width, channel = img.shape
+    target_size = mag_ratio * max(height, width)
+    if target_size > square_size:target_size = square_size
+    ratio = target_size / max(height, width)
+    target_h, target_w = int(height * ratio), int(width * ratio)
+    proc = cv2.resize(img, (target_w, target_h), interpolation = interpolation)
+    target_h32, target_w32 = target_h, target_w
+    if target_h % 32 != 0:
+        target_h32 = target_h + (32 - target_h % 32)
+    if target_w % 32 != 0:
+        target_w32 = target_w + (32 - target_w % 32)
+    resized = np.zeros((target_h32, target_w32, channel), dtype=np.float32)
+    resized[0:target_h, 0:target_w, :] = proc
+    target_h, target_w = target_h32, target_w32
+    size_heatmap = (int(target_w/2), int(target_h/2))
+    return resized, ratio, size_heatmap
+
+def get_heat_map(renderimage):
+    img = (np.clip(renderimage, 0, 1) * 255).astype(np.uint8)
+    img = cv2.applyColorMap(img, cv2.COLORMAP_JET)
+    return img
+
+
+
+
 
 # unwarp corodinates
 def warpCoord(Minv, pt):
@@ -300,7 +443,7 @@ def saveResult(img_file, img, boxes, dirname='./result/', verticals=None, texts=
 def get_image_paths_and_labels(samples,base_image_path):
     paths = []
     corrected_samples = []
-    for (i, file_line) in enumerate(tqdm(samples)):
+    for (i, file_line) in enumerate(samples):
         line_split = file_line.strip()
         line_split = line_split.split(" ")
 
