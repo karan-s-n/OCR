@@ -3,45 +3,49 @@ import cv2
 import math
 import os
 from skimage import io
-import tensorflow as tf
 import os, sys, tarfile
 import pandas as pd
-import numpy as np
 from tensorflow.keras.layers.experimental.preprocessing import StringLookup
 import tensorflow as tf
-
-import cv2
-import pandas as pd
 import matplotlib.pyplot as plt
-import os
 import yaml
 from glob import glob
 from tqdm import tqdm
+import json
+
+import os, sys, tarfile
+def extract_iamdataset_file(tar_url, extract_path='.'):
+    print(tar_url)
+    tar = tarfile.open(tar_url, 'r')
+    for item in tqdm(tar):
+        tar.extract(item, extract_path)
+        if item.name.find(".tgz") != -1 or item.name.find(".tar") != -1:
+            extract(item.name, "./" + item.name[:item.name.rfind('/')])
+
 
 
 class CropImages:
     def __init__(self):
         with open('config.yml', "r") as f:
             self.config = yaml.load(f, Loader=yaml.Loader)
-        self.datasetpath = self.config["dataset"]
-        self.wordspath = self.config["wordspath"]
-        self.report_folder = self.config["report_folder"]
+        #set all path variables
+        self.pretrainedmodels = self.config["pretrainedmodels"]
+        self.train_images = self.config["train_images"]
+        self.predict_images = self.config["predict_images"]
+        self.predict_words_path = self.config["predict_words_path"]
+        self.report_folder = self.config["predict_images"]+self.config["report_folder"]
+        self.refine = self.config["refine"]
+        self.dataset = self.config["predict_images"]+self.config["dataset"]
         self.project_path = self.config["project_path"]
-        self.epochs = self.config["epochs"]
-        self.pretrained = self.config["pretrained"]
+        self.test_folder = self.config["predict_images"]+self.config["test_folder"]
         self.crop_words = self.config["crop_words"]
-        self.train_data_path = self.config["train_data_path"]
-        self.iam_dataset_path = self.config["iam_dataset_path"]
-        self.predict_images = self.config["test_folder"]
-
-    def set_attrib(self):
-        pass
+        self.pretrained = self.config["pretrained"]
+        self.untar_iamdataset = self.config["untar_iamdataset"]
+        self.epochs = self.config["epochs"]
 
     def save_words(self, filename, cropped, idx):
         dir = self.wordspath + filename + "/"
-        if os.path.isdir(os.path.join(dir)) == False:
-            os.makedirs(os.path.join(dir))
-
+        if os.path.isdir(os.path.join(dir)) == False:os.makedirs(os.path.join(dir))
         filepath = dir + f'_{idx}.jpg'
         cv2.imwrite(filepath, cropped)
         return filepath
@@ -51,11 +55,6 @@ class CropImages:
         filename = filename.split(".png")[0]
         image = cv2.imread(path, 0)
         return filename, image
-
-    def remove_images(self, path):
-        images = glob(path)
-        for data in images:
-            os.remove(data)
 
     def load_csv(self):
         self.dataset = pd.read_csv(self.datasetpath)
@@ -80,7 +79,7 @@ class DataLoad:
 
     def get_word_list(self):
         words_list = []
-        words = open(f"{self.datapath}/words.txt", "r").readlines()
+        words = open(f"{self.datapath}IAM_Words/data/words.txt", "r").readlines()
         for line in words:
             if line[0] == "#":
                 continue
@@ -144,40 +143,29 @@ def get_heat_map(renderimage):
     img = cv2.applyColorMap(img, cv2.COLORMAP_JET)
     return img
 
-
-
-
-
 # unwarp corodinates
 def warpCoord(Minv, pt):
     out = np.matmul(Minv, (pt[0], pt[1], 1))
     return np.array([out[0]/out[2], out[1]/out[2]])
-
 
 def getDetBoxes_core(textmap, linkmap, text_threshold, link_threshold, low_text):
     # prepare data
     linkmap = linkmap.copy()
     textmap = textmap.copy()
     img_h, img_w = textmap.shape
-
-    """ labeling method """
     ret, text_score = cv2.threshold(textmap, low_text, 1, 0)
     ret, link_score = cv2.threshold(linkmap, link_threshold, 1, 0)
-
     text_score_comb = np.clip(text_score + link_score, 0, 1)
+
+    #using connecting edges
     nLabels, labels, stats, centroids = cv2.connectedComponentsWithStats(text_score_comb.astype(np.uint8), connectivity=4)
 
     det = []
     mapper = []
     for k in range(1,nLabels):
-        # size filtering
         size = stats[k, cv2.CC_STAT_AREA]
         if size < 10: continue
-
-        # thresholding
         if np.max(textmap[labels==k]) < text_threshold: continue
-
-        # make segmentation map
         segmap = np.zeros(textmap.shape, dtype=np.uint8)
         segmap[labels==k] = 255
         segmap[np.logical_and(link_score==1, text_score==0)] = 0   # remove link area
@@ -185,53 +173,39 @@ def getDetBoxes_core(textmap, linkmap, text_threshold, link_threshold, low_text)
         w, h = stats[k, cv2.CC_STAT_WIDTH], stats[k, cv2.CC_STAT_HEIGHT]
         niter = int(math.sqrt(size * min(w, h) / (w * h)) * 2)
         sx, ex, sy, ey = x - niter, x + w + niter + 1, y - niter, y + h + niter + 1
-        # boundary check
         if sx < 0 : sx = 0
         if sy < 0 : sy = 0
         if ex >= img_w: ex = img_w
         if ey >= img_h: ey = img_h
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(1 + niter, 1 + niter))
         segmap[sy:ey, sx:ex] = cv2.dilate(segmap[sy:ey, sx:ex], kernel)
-
-        # make box
         np_contours = np.roll(np.array(np.where(segmap!=0)),1,axis=0).transpose().reshape(-1,2)
         rectangle = cv2.minAreaRect(np_contours)
         box = cv2.boxPoints(rectangle)
-
-        # align diamond-shape
         w, h = np.linalg.norm(box[0] - box[1]), np.linalg.norm(box[1] - box[2])
         box_ratio = max(w, h) / (min(w, h) + 1e-5)
         if abs(1 - box_ratio) <= 0.1:
             l, r = min(np_contours[:,0]), max(np_contours[:,0])
             t, b = min(np_contours[:,1]), max(np_contours[:,1])
             box = np.array([[l, t], [r, t], [r, b], [l, b]], dtype=np.float32)
-
-        # make clock-wise order
         startidx = box.sum(axis=1).argmin()
         box = np.roll(box, 4-startidx, 0)
         box = np.array(box)
-
         det.append(box)
         mapper.append(k)
-
     return det, labels, mapper
 
 def getPoly_core(boxes, labels, mapper, linkmap):
-    # configs
     num_cp = 5
     max_len_ratio = 0.7
     expand_ratio = 1.45
     max_r = 2.0
     step_r = 0.2
-
     polys = []  
     for k, box in enumerate(boxes):
-        # size filter for small instance
         w, h = int(np.linalg.norm(box[0] - box[1]) + 1), int(np.linalg.norm(box[1] - box[2]) + 1)
         if w < 10 or h < 10:
             polys.append(None); continue
-
-        # warp image
         tar = np.float32([[0,0],[w,0],[w,h],[0,h]])
         M = cv2.getPerspectiveTransform(box, tar)
         word_label = cv2.warpPerspective(labels, M, (w, h), flags=cv2.INTER_NEAREST)
@@ -239,8 +213,6 @@ def getPoly_core(boxes, labels, mapper, linkmap):
             Minv = np.linalg.inv(M)
         except:
             polys.append(None); continue
-
-        # binarization for selected label
         cur_label = mapper[k]
         word_label[word_label != cur_label] = 0
         word_label[word_label > 0] = 1
@@ -396,15 +368,6 @@ def list_files(in_path):
     return img_files, mask_files, gt_files
 
 def saveResult(img_file, img, boxes, dirname='./result/', verticals=None, texts=None):
-        """ save text detection result one by one
-        Args:
-            img_file (str): image file name
-            img (array): raw image context
-            boxes (array): array of result file
-                Shape: [num_detections, 4] for BB output / [num_detections, 4] for QUAD output
-        Return:
-            None
-        """
         img = np.array(img)
 
         # make result file list
@@ -435,8 +398,6 @@ def saveResult(img_file, img, boxes, dirname='./result/', verticals=None, texts=
                     font_scale = 0.5
                     cv2.putText(img, "{}".format(texts[i]), (poly[0][0]+1, poly[0][1]+1), font, font_scale, (0, 0, 0), thickness=1)
                     cv2.putText(img, "{}".format(texts[i]), tuple(poly[0]), font, font_scale, (0, 255, 255), thickness=1)
-
-        # Save result image
         cv2.imwrite(res_img_file, img)
 
 
@@ -446,9 +407,6 @@ def get_image_paths_and_labels(samples,base_image_path):
     for (i, file_line) in enumerate(samples):
         line_split = file_line.strip()
         line_split = line_split.split(" ")
-
-        # Each line split will have this format for the corresponding image:
-        # part1/part1-part2/part1-part2-part3.png
         image_name = line_split[0]
         partI = image_name.split("-")[0]
         partII = image_name.split("-")[1]
@@ -461,3 +419,14 @@ def get_image_paths_and_labels(samples,base_image_path):
     print("PATH COUNT:",len(paths),"CORRECTED_SAMPLES",len(corrected_samples))
     return paths, corrected_samples
 
+def get_mnist_dataset(path):
+    with open(path,"r") as f:
+        data = json.loads(f.read())
+    filepath = path.rsplit("/")[0]
+    mnist_dataset = pd.DataFrame(columns=["image_path","labels"])
+    for k, v in data.items():
+        mnist_dataset = pd.concat([mnist_dataset,pd.DataFrame([{"image_path":filepath+"/dataset/"+k, "labels":v}])])
+    print("No. of records in mnist dataset:",len(mnist_dataset))
+    mnist_dataset = mnist_dataset.reset_index()
+    print(mnist_dataset.head(5))
+    return mnist_dataset["image_path"].values,mnist_dataset["labels"].values
