@@ -368,3 +368,14 @@ if __name__ == '__main__':
     edit_distance_callback.validation_ds = ocr.validation_ds
     history = model.fit( ocr.train_ds, epochs=dl.epochs, callbacks=[edit_distance_callback],)
     model.save(dl.pretrainedmodels+"iamdatasetmodel.pth")
+  dbupdate = False
+  if dbupdate:
+        conn, cur = connect('db/ocr_db')
+        dataframe = get_dataset("/content/drive/MyDrive/datasets/predict_images/raw_images/reports/dataset.csv", conn,
+                                  "rawdata")
+        ut.create_load(cur, conn, "rawdata")
+        ut.fetch_data(cur, "rawdata")
+
+
+
+
