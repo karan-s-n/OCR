@@ -21,10 +21,19 @@ class ImagePreprocessing:
     self.AUTOTUNE = tf.data.AUTOTUNE
 
 
-  def preprocess_image(self,image_path):
+  def preprocess_png_image(self,image_path):
       img_size=(self.image_width, self.image_height)
       image = tf.io.read_file(image_path)
       image = tf.image.decode_png(image, 1)
+      image = self.distortion_free_resize(image, img_size)
+      image = tf.cast(image, tf.float32) / 255.0
+      return image
+
+
+  def preprocess_jpeg_image(self,image_path):
+      img_size=(self.image_width, self.image_height)
+      image = tf.io.read_file(image_path)
+      image = tf.image.decode_jpeg(image, 1)
       image = self.distortion_free_resize(image, img_size)
       image = tf.cast(image, tf.float32) / 255.0
       return image
@@ -39,8 +48,10 @@ class ImagePreprocessing:
 
 
   def process_images_labels(self,image_path, label):
-      image = self.preprocess_image(image_path)
+      print(image_path)
+      image = self.preprocess_jpeg_image(image_path)
       label = self.vectorize_label(label)
+      print(image.shape)
       return {"image": image, "label": label}
 
 
@@ -58,8 +69,17 @@ self.process_images_labels, num_parallel_calls=self.AUTOTUNE
       image = tf.image.resize(image, size=(h, w), preserve_aspect_ratio=True)
 
       # Check tha amount of padding needed to be done.
-      pad_height = h - tf.shape(image)[0]
-      pad_width = w - tf.shape(image)[1]
+      if h>tf.shape(image)[0]:
+        pad_height = h - tf.shape(image)[0]
+      else:
+        pad_height = 0
+      if w > tf.shape(image)[1]:
+        pad_width = w - tf.shape(image)[1]
+      else:
+        pad_width=0
+
+
+
       # Only necessary if you want to do same amount of padding on both sides.
       if pad_height % 2 != 0:
           height = pad_height // 2
@@ -121,6 +141,7 @@ class OCRModel(ImagePreprocessing):
     self.base_path = training_path
     self.base_image_path = os.path.join(self.base_path , "IAM_Words","data","words")
     self.mnist_path = os.path.join(self.base_path , "mnist_Words","labels.json")
+    self.mnist_image_path = os.path.join(self.base_path , "mnist_Words","dataset","v011_words_small")
     if dl.untar_iamdataset:
         ut.extract_iamdataset_file(self.base_image_path+"/words.tgz",extract_path=self.base_image_path)
     self.dataprep = ut.DataLoad(self.base_path)
@@ -128,7 +149,7 @@ class OCRModel(ImagePreprocessing):
     self.train_labels_cleaned = []
     self.characters = set()
     self.max_len = 0
-    self.mnist_paths,self.mnist_labels = ut.get_mnist_dataset(self.mnist_path)
+    self.mnist_paths,self.mnist_labels = ut.get_mnist_dataset(self.mnist_path,self.mnist_image_path)
     self.train_data , self.test_data,self.valid_data = self.dataprep.train_valid_test_split()
 
   def prepare_data(self):
@@ -137,10 +158,8 @@ class OCRModel(ImagePreprocessing):
       self.tr_images, self.tr_labels = ut.get_image_paths_and_labels(self.train_data,self.base_image_path)
       self.valid_images,self.valid_labels = ut.get_image_paths_and_labels(self.test_data,self.base_image_path)
       self.test_images, self.test_labels = ut.get_image_paths_and_labels(self.valid_data,self.base_image_path)
-      self.tr_images.extend(self.mnist_paths)
-      self.tr_labels.extend(self.mnist_labels)
 
-  
+
   def clean_labels(self,labels):
     cleaned_labels = []
     for label in labels:
@@ -149,7 +168,6 @@ class OCRModel(ImagePreprocessing):
     return cleaned_labels
 
   def data_clean(self):
-
     print("###STEP3: DATA CLEANING")
     # Find maximum length and the size of the vocabulary in the training data.
     self.train_labels_cleaned = []
@@ -175,10 +193,15 @@ class OCRModel(ImagePreprocessing):
     self.test_labels_cleaned = [label.split(" ")[-1].strip() for label in self.test_labels]
 
     print("PREPARING DATASET FOR TRAINING")
+    #self.tr_images.extend(self.mnist_paths)
+    #self.train_labels_cleaned.extend(self.mnist_labels)
+    print("NO. of training datasets after extending with mnist", len(self.tr_images))
     self.train_ds = self.prepare_dataset(self.tr_images, self.train_labels_cleaned,"train")
     self.validation_ds = self.prepare_dataset(self.valid_images, self.validation_labels_cleaned,"valid")
     self.test_ds = self.prepare_dataset(self.test_images, self.test_labels_cleaned,"test")  
     print("COMPLETED  DATASET FOR TRAINING")
+
+
   def build_model(self):
     # Inputs to the model
     input_img = keras.Input(shape=(self.image_width, self.image_height, 1), name="image")
@@ -356,8 +379,6 @@ if __name__ == '__main__':
       pred.dataset.to_csv(dl.datasetpath,index=False)
   else:
     print("TRAINING PATH:",dl.train_images)
-
-
     ocr = OCRModel(dl.train_images)
     ocr.prepare_data()
     ocr.data_clean()
@@ -366,15 +387,10 @@ if __name__ == '__main__':
     prediction_model = keras.models.Model(model.get_layer(name="image").input, model.get_layer(name="dense2").output)
     edit_distance_callback = EditDistanceCallback(prediction_model)
     edit_distance_callback.validation_ds = ocr.validation_ds
+    edit_distance_callback.max_len = ocr.max_len
     history = model.fit( ocr.train_ds, epochs=dl.epochs, callbacks=[edit_distance_callback],)
-    model.save(dl.pretrainedmodels+"iamdatasetmodel.pth")
-  dbupdate = False
-  if dbupdate:
-        conn, cur = connect('db/ocr_db')
-        dataframe = get_dataset("/content/drive/MyDrive/datasets/predict_images/raw_images/reports/dataset.csv", conn,
-                                  "rawdata")
-        ut.create_load(cur, conn, "rawdata")
-        ut.fetch_data(cur, "rawdata")
+    print(history.history)
+    model.save("iamdatasetmodel.pth")
 
 
 
