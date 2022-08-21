@@ -2,7 +2,6 @@ import sys
 import os
 import time
 import argparse
-
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
@@ -15,11 +14,14 @@ import cv2
 from skimage import io
 import numpy as np
 from collections import OrderedDict
+import pandas as pd
+import numpy as np
+from tensorflow.keras.layers.experimental.preprocessing import StringLookup
+import tensorflow as tf
 
 #userdefined packages 
-from utils import utils as ut
-import utils.imageutils as im
-from utils.architect import CRAFT
+import utils as ut
+from architect import CRAFT
 
 def copyStateDict(state_dict):
     if list(state_dict.keys())[0].startswith("module"):
@@ -42,20 +44,19 @@ class Configuration:
         self.config = yaml.load(f, Loader=yaml.Loader)
 
   def get_attrib(self):
-    self.trained_model  = self.config["trained_model"]
+    self.trained_model  = self.config["pretrainedmodels"]+"craft_mlt_25k.pth"
     self.text_threshold  = self.config["text_threshold"]
     self.low_text  = self.config["low_text"]
     self.link_threshold  = self.config["link_threshold"]
     self.cuda  = self.config["cuda"]
-    self.canvas_size = self.config["canvas_size"]
-    self.mag_ratio =  self.config["mag_ratio"]
+    self.canvas_size = float(self.config["canvas_size"])
+    self.mag_ratio =  float(self.config["mag_ratio"])
     self.poly = self.config["poly"]
     self.show_time = self.config["show_time"]
-    self.test_folder = self.config["test_folder"]
-    self.report_folder = self.config["report_folder"]
+    self.test_folder = self.config["predict_images"]+self.config["test_folder"]
+    self.report_folder = self.config["predict_images"]+self.config["report_folder"]
     self.data_limit = self.config["data_limit"]
-    self.iam_dataset_path = self.config["iam_dataset_path"]
-    # self.predict_images = self.config["predict_images"]
+    self.predict_images = self.config["predict_images"]
   
 
 args = Configuration()
@@ -72,11 +73,11 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
     t0 = time.time()
 
     # resize
-    img_resized, target_ratio, size_heatmap = im.resize_aspect_ratio(image, args.canvas_size, interpolation=cv2.INTER_LINEAR, mag_ratio=args.mag_ratio)
+    img_resized, target_ratio, size_heatmap = ut.resize_image(image, args.canvas_size, interpolation=cv2.INTER_LINEAR, mag_ratio=args.mag_ratio)
     ratio_h = ratio_w = 1 / target_ratio
 
     # preprocessing
-    x = im.normalizeMeanVariance(img_resized)
+    x = ut.normalizeMeanVar(img_resized)
     x = torch.from_numpy(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
     x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
 
@@ -105,16 +106,14 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
     # render results (optional)
     render_img = score_text.copy()
     render_img = np.hstack((render_img, score_link))
-    ret_score_text = im.cvt2HeatmapImg(render_img)
+    ret_score_text = ut.get_heat_map(render_img)
     if args.show_time : print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
     return boxes, polys, ret_score_text
 
 
 
 if __name__ == '__main__':
-    # load net
-    net = CRAFT()     # initialize
-
+    net = CRAFT()
     print('Loading weights from checkpoint (' + args.trained_model + ')')
     if args.cuda:
         net.load_state_dict(copyStateDict(torch.load(args.trained_model)))
@@ -131,17 +130,18 @@ if __name__ == '__main__':
     import pandas as pd
     dataset = pd.DataFrame()
     for k, image_path in enumerate(image_list):
-        image = im.loadImage(image_path)
+        image = ut.loadImage(image_path)
         bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, args.cuda, args.poly)
         # save score text
         filename, file_ext = os.path.splitext(os.path.basename(image_path))
         mask_file = result_folder + "/res_" + filename + '_mask.jpg'
         cv2.imwrite(mask_file, score_text)
         strResult = ""
-        for box in  polys:
+        for box in polys:
           rect = cv2.boundingRect(box)
           x,y,w,h = rect
-          dataset = dataset.append({"image_path":image_path , "x":int(x),"y":int(y),"w":int(w),"h":int(h)},ignore_index = True)
+          temp = pd.DataFrame([{"image_path":image_path , "x":int(x),"y":int(y),"w":int(w),"h":int(h)}])
+          dataset = pd.concat([dataset,temp])
         ut.saveResult(image_path, image[:,:,::-1], polys, dirname=result_folder)
     dataset.to_csv(result_folder+"/dataset.csv",index=False)
     print("elapsed time : {}s".format(time.time() - t))
