@@ -74,35 +74,31 @@ class CropImages:
 
 
 class DataLoad:
-    def __init__(self, datapath, filter_index=[0, 1, 8]):
+    def __init__(self, datapath):
         self.datapath = datapath
 
     def get_word_list(self):
-        words_list = []
+        self.words_list = []
         words = open(f"{self.datapath}IAM_Words/data/words.txt", "r").readlines()
         for line in words:
-            if line[0] == "#":
-                continue
-            if line.split(" ")[1] != "err":  # We don't need to deal with errored entries.
-                words_list.append(line)
-            len(words_list)
-        # np.random.shuffle(words_list)
-        self.words_list = words_list
+            if line[0] == "#":continue
+            if line.split(" ")[1] != "err":self.words_list.append(line)
+        np.random.shuffle(self.words_list)
+        print("No.of records in words_list",len(self.words_list))
 
     def train_valid_test_split(self):
-        words_df = self.words_list
-        # spliting 90% of data to train and 5% test and 5% validate
-        split_idx = int(0.9 * len(words_df))
-        self.train_samples = words_df[:split_idx]
-        self.test_samples = words_df[split_idx:]
-        val_split_idx = int(0.5 * len(self.test_samples))
-        self.validation_samples = self.test_samples[:val_split_idx]
-        self.test_samples = self.test_samples[val_split_idx:]
-        assert len(words_df) == len(self.train_samples) + len(self.validation_samples) + len(self.test_samples)
-        print(f"Total training samples: {len(self.train_samples)}")
-        print(f"Total validation samples: {len(self.validation_samples)}")
-        print(f"Total test samples: {len(self.test_samples)}")
-        return self.train_samples, self.test_samples, self.validation_samples
+        split_idx = int(0.9 * len(self.words_list))
+        self.tr_samples = self.words_list[:split_idx]
+        self.tst_samples = self.words_list[split_idx:]
+        val_split_idx = int(0.5 * len(self.tst_samples))
+        self.valid_samples = self.tst_samples[:val_split_idx]
+        self.tst_samples = self.tst_samples[val_split_idx:]
+        assert len(self.words_list) == len(self.tr_samples) + len(self.valid_samples) + len(self.tst_samples)
+        print(f"Total training samples: {len(self.tr_samples)}")
+        print(f"Total validation samples: {len(self.valid_samples)}")
+        print(f"Total test samples: {len(self.tst_samples)}")
+        print("DATA SPLIT TASK COMPLETED")
+        return self.tr_samples, self.tst_samples, self.valid_samples
 
 
 def loadImage(file):
@@ -410,48 +406,20 @@ def get_image_paths_and_labels(samples,base_image_path):
         image_name = line_split[0]
         partI = image_name.split("-")[0]
         partII = image_name.split("-")[1]
-        img_path = os.path.join(
-            base_image_path, partI, partI + "-" + partII, image_name + ".png"
-        )
+        img_path = os.path.join(base_image_path, partI, partI + "-" + partII, image_name + ".png")
         if os.path.getsize(img_path):
             paths.append(img_path)
             corrected_samples.append(file_line.split("\n")[0])
-    print("PATH COUNT:",len(paths),"CORRECTED_SAMPLES",len(corrected_samples))
+    print("PATH COUNT:",len(paths),"CORRECTED_SAMPLES:",len(corrected_samples))
     return paths, corrected_samples
 
-def get_mnist_dataset(path):
+def get_mnist_dataset(path,filepath):
     with open(path,"r") as f:
         data = json.loads(f.read())
-    filepath = path.rsplit("/")[0]
     mnist_dataset = pd.DataFrame(columns=["image_path","labels"])
+
     for k, v in data.items():
-        mnist_dataset = pd.concat([mnist_dataset,pd.DataFrame([{"image_path":filepath+"/dataset/"+k, "labels":v}])])
+        mnist_dataset = pd.concat([mnist_dataset,pd.DataFrame([{"image_path":filepath+"/"+k, "labels":v}])])
     print("No. of records in mnist dataset:",len(mnist_dataset))
     mnist_dataset = mnist_dataset.reset_index()
-    print(mnist_dataset.head(5))
     return mnist_dataset["image_path"].values,mnist_dataset["labels"].values
-###################### DB #############################33
-
-
-import pandas as pd
-import sqlite3
-
-def connect(dbname):
-  conn = sqlite3.connect(dbname)
-  cur = conn.cursor()
-  return conn,cur
-
-def get_dataset(path,conn,tablename):
-  df = pd.read_csv(path)
-  df.to_sql(tablename, conn, if_exists='replace', index = False)
-  return df
-
-def create_load(cur,conn,tablename):
-  cur.execute(f'CREATE TABLE IF NOT EXISTS {tablename} (imagpath text, x number,y number,w number,h number , wordpath text , predicttext text)')
-  conn.commit()
-
-def fetch_data(cur,table):
-  cur.execute(f''' SELECT * FROM {table}''')
-  for row in cur.fetchall():
-      print (row)
-      break
