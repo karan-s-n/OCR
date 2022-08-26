@@ -598,6 +598,10 @@ if __name__ == '__main__':
       pred.dataset = dl.load_csv()
       pred.predict_images()
       pred.dataset.to_csv(dl.datasetpath,index=False)
+    conn,cur = connect('ocr_db.sqlite3')
+    dataframe = get_dataset(dl.datasetpath,conn,"rawdata")
+    create_load(cur,conn,"rawdata")
+    fetch_data(cur,"rawdata")
     
 
   else:
