@@ -2,16 +2,88 @@ from tensorflow import keras
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import os
-from glob import glob
+import glob
+import re
+import cv2
 import numpy as np
 import utils as ut
-import pandas as pd
 from tensorflow.keras.layers.experimental.preprocessing import StringLookup
-
 np.random.seed(42)
 tf.random.set_seed(42)
+import json
+from doctr.io import DocumentFile
+from doctr.models import ocr_predictor
+os.environ['USE_TORCH'] = '1'
+model = ocr_predictor(pretrained=True)
+import pandas as pd
 
 
+def format_to_csv(result_df,image_path):
+    image = cv2.imread(image_path,0)
+    h,w = image.shape
+    data_df = pd.DataFrame()
+    for i in range(len(result_df)):
+        block_df = normalize(result_df["pages.blocks"][i])
+        for j in block_df.index:
+                line_df = normalize(block_df["lines"][j])
+                for k in line_df.index:
+                    word_df = normalize(line_df["words"][k])
+                    word_df["pages.page_idx"]=i
+                    word_df["blocks.block_idx"]=j
+                    word_df["line.line_idx"]=k
+                    word_df["word.line_idx"]=word_df.index.copy()
+                    for w in range(0,len(word_df)):
+                        word = word_df.loc[w,"geometry"]
+                        word_df.loc[w,"x1"]=   int(word[0][0]*w)
+                        word_df.loc[w,"y1"]=   int(word[0][1]*h)
+                        word_df.loc[w,"x2"]=   int(word[1][0]*w)
+                        word_df.loc[w,"y2"]=   int(word[1][1]*h)
+                    data_df = pd.concat([data_df,word_df])
+    return data_df
+
+def normalize(data):
+    df = pd.DataFrame(data)
+    json_struct = json.loads(df.to_json(orient="records"))
+    result = pd.json_normalize(json_struct) #use pd.io.json
+    result=result.reset_index()
+    return result
+
+def resize(image_list):
+        global max_height
+        global max_width
+        max_height = max(list(map(lambda x :x.shape[0], image_list)))
+        max_width = max(list(map(lambda x :x.shape[1], image_list)))
+        dim = (max_width,max_height)
+        return [cv2.resize(img, dim, interpolation = cv2.INTER_AREA) for img in image_list]
+def get_data(string,pattern,df,key):
+    try:
+        field_raw = df[df[key].str.contains(string)][key].values[0]
+        field = re.findall(pattern,field_raw)[0]
+        return field
+    except:
+        return ""
+
+def call_OCR(image_path,filename):
+    import json
+    # PDF
+    doc = DocumentFile.from_images(image_path)
+    # Analyze
+    result = model(doc)
+    json_output = result.export()
+    if len(json_output)!=0:
+        result_df = pd.DataFrame(json_output)
+        json_struct = json.loads(result_df.to_json(orient="records"))
+        result_df = pd.json_normalize(json_struct) #use pd.io.json
+        result_df=result_df[["pages.page_idx","pages.blocks"]]
+        data_df = format_to_csv(result_df,image_path)
+        blocks_data = pd.DataFrame(columns = ["text"],index = list(set(data_df["blocks.block_idx"].values)))
+        for blockidx in blocks_data.index:
+            filter_data = data_df[data_df["blocks.block_idx"]==blockidx]["value"]
+            blocks_data.loc[blockidx,filename] =" ".join(filter_data.values)
+    return blocks_data
+
+
+############################### IMPORTED ALL THE PACKAGES ######################################
 class ImagePreprocessing:
   def __init__(self):
     self.batch_size = 64
@@ -48,10 +120,8 @@ class ImagePreprocessing:
 
 
   def process_images_labels(self,image_path, label):
-      print(image_path)
       image = self.preprocess_jpeg_image(image_path)
       label = self.vectorize_label(label)
-      print(image.shape)
       return {"image": image, "label": label}
 
 
@@ -135,14 +205,14 @@ self.process_images_labels, num_parallel_calls=self.AUTOTUNE
 
 
 class OCRModel(ImagePreprocessing):
-  def __init__(self,training_path):
+  def __init__(self,training_path,untar_iamdataset=False):
     print("###STEP1: DATA LOADING")
     super().__init__()
     self.base_path = training_path
     self.base_image_path = os.path.join(self.base_path , "IAM_Words","data","words")
     self.mnist_path = os.path.join(self.base_path , "mnist_Words","labels.json")
     self.mnist_image_path = os.path.join(self.base_path , "mnist_Words","dataset","v011_words_small")
-    if dl.untar_iamdataset:
+    if untar_iamdataset:
         ut.extract_iamdataset_file(self.base_image_path+"/words.tgz",extract_path=self.base_image_path)
     self.dataprep = ut.DataLoad(self.base_path)
     self.dataprep.get_word_list()
@@ -202,7 +272,7 @@ class OCRModel(ImagePreprocessing):
     print("COMPLETED  DATASET FOR TRAINING")
 
 
-  def build_model(self):
+  def build_model_old(self):
     # Inputs to the model
     input_img = keras.Input(shape=(self.image_width, self.image_height, 1), name="image")
     labels = keras.layers.Input(name="label", shape=(None,))
@@ -226,95 +296,141 @@ class OCRModel(ImagePreprocessing):
     x = keras.layers.Bidirectional(
         keras.layers.LSTM(64, return_sequences=True, dropout=0.25)
     )(x)
-
-    # +2 is to account for the two special tokens introduced by the CTC loss.
-    # The recommendation comes here: https://git.io/J0eXP.
     x = keras.layers.Dense(
         len(self.char_to_num.get_vocabulary()) + 2, activation="softmax", name="dense2"
     )(x)
 
     # Add CTC layer for calculating CTC loss at each step.
-    output = CTCLayer(name="ctc_loss")(labels, x)
+    output = CTCLossCalculator(name="ctc_loss")(labels, x)
 
     # Define the model.
     self.model = keras.models.Model(
-        inputs=[input_img, labels], outputs=output, name="handwriting_recognizer"
+        inputs=[input_img, labels], outputs=output, name="OCR"
     )
     # Optimizer.
     opt = keras.optimizers.Adam()
     # Compile the model and return.
-    self.model.compile(optimizer=opt)
+    model.compile(optimizer=opt,)
+    self.model = model
     return self.model
 
-class CTCLayer(keras.layers.Layer):
+
+  def build_model(self):
+          input_img = keras.Input(shape=(self.image_width, self.image_height, 1), name="image")
+          labels = keras.layers.Input(name="label", shape=(None,))
+          x = keras.layers.Conv2D(
+              32,
+              (3, 3),
+              activation="relu",
+              kernel_initializer="he_normal",
+              padding="same",
+              name="Conv1",
+          )(input_img)
+          x = keras.layers.MaxPooling2D((2, 2), name="pool1")(x)
+          x = keras.layers.Conv2D(
+              64,
+              (3, 3),
+              activation="relu",
+              kernel_initializer="he_normal",
+              padding="same",
+              name="Conv2",
+          )(x)
+          x = keras.layers.MaxPooling2D((2, 2), name="pool2")(x)
+          new_shape = ((self.image_width // 4), (self.image_height // 4) * 64)
+          x = keras.layers.Reshape(target_shape=new_shape, name="reshape")(x)
+          x = keras.layers.Dense(64, activation="relu", name="dense1")(x)
+          x = keras.layers.Dropout(0.2)(x)
+
+          # RNNs.
+          x = keras.layers.Bidirectional(
+              keras.layers.LSTM(128, return_sequences=True, dropout=0.25)
+          )(x)
+          x = keras.layers.Bidirectional(
+              keras.layers.LSTM(64, return_sequences=True, dropout=0.25)
+          )(x)
+
+          x = keras.layers.Dense(
+              len(self.char_to_num.get_vocabulary()) + 2, activation="softmax", name="dense2"
+          )(x)
+
+          # Add CTC layer for calculating CTC loss at each step.
+          output = CTCLayer(name="ctc_loss")(labels, x)
+
+          # Define the model.
+          model = keras.models.Model(
+              inputs=[input_img, labels], outputs=output, name="handwriting_recognizer"
+          )
+          # Optimizer.
+          opt = keras.optimizers.Adam()
+          # Compile the model and return.
+          model.compile(optimizer=opt)
+          return model
+
+
+class CTCLossCalculator(keras.layers.Layer):
     def __init__(self, name=None):
         super().__init__(name=name)
         self.loss_fn = keras.backend.ctc_batch_cost
 
-    def call(self, y_true, y_pred):
-        batch_len = tf.cast(tf.shape(y_true)[0], dtype="int64")
-        input_length = tf.cast(tf.shape(y_pred)[1], dtype="int64")
-        label_length = tf.cast(tf.shape(y_true)[1], dtype="int64")
+    def call(self, actual, predict):
+        batch_len = tf.cast(tf.shape(actual)[0], dtype="int64")
+        input_length = tf.cast(tf.shape(predict)[1], dtype="int64")
+        label_length = tf.cast(tf.shape(actual)[1], dtype="int64")
         input_length = input_length * tf.ones(shape=(batch_len, 1), dtype="int64")
         label_length = label_length * tf.ones(shape=(batch_len, 1), dtype="int64")
-        loss = self.loss_fn(y_true, y_pred, input_length, label_length)
+        loss = self.loss_fn(actual, predict, input_length, label_length)
         self.add_loss(loss)
-        return y_pred
+        return predict
 
 
-class EditDistanceCallback(keras.callbacks.Callback):
-    def __init__(self, pred_model):
-        super().__init__()
-        self.prediction_model = pred_model
-
-
-    def on_epoch_end(self, epoch, logs=None):
-        edit_distances = []
-        self.validation_images = []
-        self.validation_labels = []
-
-        for batch in self.validation_ds:
-            self.validation_images.append(batch["image"])
-            self.validation_labels.append(batch["label"])
-        
-        for i in range(len(self.validation_images)):
-            labels = self.validation_labels[i]
-            predictions = self.prediction_model.predict(self.validation_images[i])
-            edit_distances.append(self.calculate_edit_distance(labels, predictions).numpy())
-
-        print(
-            f"Mean edit distance for epoch {epoch + 1}: {np.mean(edit_distances):.4f}"
-        )
-
-    def calculate_edit_distance(self,labels, predictions):
-      # Get a single batch and convert its labels to sparse tensors.
+def calculate_edit_distance(labels, predictions,max_len):
       saprse_labels = tf.cast(tf.sparse.from_dense(labels), dtype=tf.int64)
-
-      # Make predictions and convert them to sparse tensors.
       input_len = np.ones(predictions.shape[0]) * predictions.shape[1]
       predictions_decoded = keras.backend.ctc_decode(
             predictions, input_length=input_len, greedy=True
-        )[0][0][:, :self.max_len]
+        )[0][0][:, :max_len]
       sparse_predictions = tf.cast(
             tf.sparse.from_dense(predictions_decoded), dtype=tf.int64
         )
-
-      # Compute individual edit distances and average them out.
       edit_distances = tf.edit_distance(
             sparse_predictions, saprse_labels, normalize=False
         )
       return tf.reduce_mean(edit_distances)
 
+class EditDistanceCallback(keras.callbacks.Callback):
+    def __init__(self, pred_model,validation_images,validation_labels,max_len):
+        super().__init__()
+        self.prediction_model = pred_model
+        self.validation_images = validation_images
+        self.validation_labels = validation_labels
+        self.max_len = max_len
+
+    def on_epoch_end(self, epoch, logs=None):
+        edit_distances = []
+
+        for i in range(len(self.validation_images)):
+            labels = self.validation_labels[i]
+            predictions = self.prediction_model.predict(self.validation_images[i])
+            edit_distances.append(calculate_edit_distance(labels, predictions,self.max_len).numpy())
+
+        print(
+            f"Mean edit distance for epoch {epoch + 1}: {np.mean(edit_distances):.4f}"
+        )
+
+
+
+
 
 class Prediction(ImagePreprocessing):
+
   def __init__(self,pretrained_path,image_path):
     super().__init__()
     self.image_path = image_path
     print("\nSTEP1: LOADING PREDICTION DATASET")
-    self.model = keras.models.load_model(pretrained_path)
+    self.model = keras.models.load_model(pretrained_path+"iamdatasetmodel.pth")
     self.prediction_model = keras.models.Model(self.model.get_layer(name="image").input, self.model.get_layer(name="dense2").output)
     self.max_len = 30
-    with open(image_path+"../characters.txt","r") as f:
+    with open(image_path+"../../characters.txt","r") as f:
       characters = list(f.read())
     AUTOTUNE = tf.data.AUTOTUNE
     self.char_to_num = StringLookup(vocabulary=list(characters), mask_token=None)
@@ -352,6 +468,7 @@ class Prediction(ImagePreprocessing):
         pred_texts = self.decode_batch_predictions(preds)
         pred_texts_list.extend(pred_texts)
     print("Predicted text",len(pred_texts_list))
+    print(pred_texts_list)
     self.dataset["Prediction_Text"] = pd.Series(pred_texts_list)
     return pred_texts_list
 
@@ -361,13 +478,112 @@ if __name__ == '__main__':
   dl = ut.CropImages()
   pretrained_model = dl.pretrained
   crop_words =  dl.crop_words
-  print("FETCHING MNIST DATASET")
+  pretrained_OPT = dl.pretrained_OPT
 
-  if pretrained_model:
+  if dl.pretrained_OPT:
+      print("Loading pretrained")
+      overall_df = {}
+      print("iamges path",dl.test_folder + "*.png")
+      images_path = [img for img in glob.glob(dl.test_folder + "*.png")]
+      print("No. of images loaded",len(images_path))
+      filenames = [fstring.rsplit("\\")[-1] for fstring in images_path]
+      extract_data = pd.DataFrame(columns=["Company", "Client", "Location", "Date", "Contract"], index=filenames)
+      for idx in range(0, len(filenames[0:50])):
+          print(filenames[idx])
+          final_df = call_OCR(images_path[idx], filenames[idx])
+          #print(final_df.head(4))
+          overall_df[filenames[idx]] = final_df
+      for key, df in overall_df.items():
+          df.to_csv(str(key)+".csv")
+          Company = "  ".join(df[key][0:8].values)
+          if ("Enginee" in Company) or ("Co. Lt" in Company) or ("Eng" in Company):
+              Location = get_data("Location", "Location(.*)Client", df, key)
+              print("Location", Location)
+              Client = get_data("Client", "Client(.*)Method of Borin", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "Date(.*)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "Contract(.*)Location", df, key)
+              print("Contract", Contract)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+
+          elif "Drilling" in Company:
+              Location = get_data("Location", "LOCATION(.*)", df, key)
+              print("Location", Location)
+              Client = get_data("Client", "CLIENT(....)", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "DATE(................)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "JOB NO(.......)", df, key)
+              print("Contract", Contract)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+
+          elif "Dunelm" in Company:
+              Location = get_data("Location", "LOCATION(.*)", df, key)
+              print("Location", Location)
+              Client = get_data("Client", "CLIENT(....)", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "Start date(................)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "Job No(.......)", df, key)
+              print("Contract", Contract)
+              final_depth = get_data("Final depth", "Job Final depth(....", df, key)
+              print("final_depth", final_depth)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+
+
+          elif "Soil" in Company:
+              Location = get_data("Location", "Location(.*)", df, key)
+              print("Location", Location)
+              Client = get_data("Client", "Client(.*)", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "Date(.*)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "Contract (.......)", df, key)
+              print("Contract", Contract)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+          elif "INVESTIGATION" in Company:
+              Location = get_data("Location", "Location(.*)", df, key)
+              print("Location", Location)
+              Client = get_data("Client", "Client(.*)", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "Date(.*)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "Contract (.......)", df, key)
+              print("Contract", Contract)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+          elif "BOREHOLE RECORD" in Company:
+              Location = get_data("Location", "Location(.*)", df, key)
+              print("Location", Location)
+              Client = get_data("Client", "Client(.*)", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "Date(.*)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "Contract(.*)", df, key)
+              print("Contract", Contract)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+          elif "BORING METHOD" in "  ".join(df[key][0:20].values):
+              Location = get_data("Location", "Location(.*)", df, key)
+              print("Location", Location)
+              Client = get_data("CLIENT", "CLIENT([a-z|A-Z]*)", df, key)
+              print("Client", Client)
+              Date = get_data("Date|Dat", "Date(.*)", df, key)
+              print("Date", Date)
+              Contract = get_data("Contract", "Contract(.*)", df, key)
+              print("Contract", Contract)
+              for col in extract_data.columns:
+                  extract_data.loc[key, col] = eval(col)
+      extract_data.to_csv("Extract_data.csv")
+  elif pretrained_model:
     print("PREDICTION PATH:",dl.predict_images)
-    pred = Prediction(pretrained_path=weights_path,image_path = base_path)
+    pred = Prediction(pretrained_path=dl.pretrainedmodels,image_path = dl.predict_images+dl.predict_words_path)
     if crop_words:
-      dl.set_attrib()
       dl.load_csv()
       dl.get_word_img()
       pred.dataset = dl.load_csv()
@@ -377,6 +593,7 @@ if __name__ == '__main__':
       pred.dataset = dl.load_csv()
       pred.predict_images()
       pred.dataset.to_csv(dl.datasetpath,index=False)
+
   else:
     print("TRAINING PATH:",dl.train_images)
     ocr = OCRModel(dl.train_images)
@@ -388,8 +605,8 @@ if __name__ == '__main__':
     edit_distance_callback = EditDistanceCallback(prediction_model)
     edit_distance_callback.validation_ds = ocr.validation_ds
     edit_distance_callback.max_len = ocr.max_len
-    history = model.fit( ocr.train_ds, epochs=dl.epochs, callbacks=[edit_distance_callback],)
-    print(history.history)
+    history = model.fit(ocr.train_ds, epochs=dl.epochs, callbacks=[edit_distance_callback],)
+    print("overall loss",history.history["loss"])
     model.save("iamdatasetmodel.pth")
 
 
