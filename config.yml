@@ -1,11 +1,11 @@
-pretrainedmodels : content/drive/MyDrive/pretrainedmodels/
-train_images: content/drive/MyDrive/datasets/train_images/
-predict_images: content/drive/MyDrive/datasets/predict_images/
+pretrainedmodels : /content/drive/MyDrive/pretrainedmodels/
+train_images: /content/drive/MyDrive/datasets/train_images/
+predict_images: /content/drive/MyDrive/datasets/predict_images/
 predict_words_path : raw_images/words/
 test_folder : raw_images/
 report_folder : raw_images/reports/
 refine : False
-dataset : content/drive/MyDrive/datasets/predict_images/raw_images/reports/dataset.csv
+dataset : /content/drive/MyDrive/datasets/predict_images/raw_images/reports/dataset.csv
 project_path : ./
 crop_words : True
 untar_iamdataset: False
@@ -21,6 +21,6 @@ pretrained : True
 poly : False
 show_time : False
 data_limit : 10
-pretrained_OPT: 1
+pretrained_OPT: 0
 
 
