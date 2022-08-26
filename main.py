@@ -12,8 +12,8 @@ from tensorflow.keras.layers.experimental.preprocessing import StringLookup
 np.random.seed(42)
 tf.random.set_seed(42)
 import json
-from doctr.doctr.io import DocumentFile
-from doctr.doctr.models import ocr_predictor
+from doctr.io import DocumentFile
+from doctr.models import ocr_predictor
 os.environ['USE_TORCH'] = '1'
 model = ocr_predictor(pretrained=True)
 import pandas as pd
