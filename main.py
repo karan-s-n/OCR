@@ -600,10 +600,9 @@ if __name__ == '__main__':
       pred.dataset.to_csv(dl.datasetpath,index=False)
     conn,cur = connect('ocr_db.sqlite3')
     dataframe = get_dataset(dl.datasetpath,conn,"rawdata")
-    create_load(cur,conn,"rawdata")
+    create_load_db(cur,conn,"rawdata")
     fetch_data(cur,"rawdata")
     
-
   else:
     print("TRAINING PATH:",dl.train_images)
     ocr = OCRModel(dl.train_images)
