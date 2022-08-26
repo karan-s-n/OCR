@@ -6,3 +6,8 @@ scipy>=1.1.0
 torch>=1.12.1
 pyyaml>=6.0
 tqdm
+frontend
+weasyprint
+fitz
+mplcursors
+pymupdf
