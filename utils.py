@@ -40,8 +40,11 @@ class CropImages:
         self.test_folder = self.config["predict_images"]+self.config["test_folder"]
         self.crop_words = self.config["crop_words"]
         self.pretrained = self.config["pretrained"]
+        self.pretrained_OPT = self.config["pretrained_OPT"]
         self.untar_iamdataset = self.config["untar_iamdataset"]
         self.epochs = self.config["epochs"]
+        self.datasetpath = self.config["dataset"]
+        self.wordspath = self.config["predict_images"]+self.config["predict_words_path"]
 
     def save_words(self, filename, cropped, idx):
         dir = self.wordspath + filename + "/"
