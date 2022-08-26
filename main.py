@@ -580,6 +580,10 @@ if __name__ == '__main__':
               for col in extract_data.columns:
                   extract_data.loc[key, col] = eval(col)
       extract_data.to_csv("Extract_data.csv")
+      conn,cur = connect('ocr_db.sqlite3')
+      dataframe = get_dataset("Extract_data.csv",conn,"Summary")
+      summary(cur,conn,"Summary")
+      fetch_data(cur,"Summary")
   elif pretrained_model:
     print("PREDICTION PATH:",dl.predict_images)
     pred = Prediction(pretrained_path=dl.pretrainedmodels,image_path = dl.predict_images+dl.predict_words_path)
@@ -593,6 +597,7 @@ if __name__ == '__main__':
       pred.dataset = dl.load_csv()
       pred.predict_images()
       pred.dataset.to_csv(dl.datasetpath,index=False)
+    
 
   else:
     print("TRAINING PATH:",dl.train_images)
