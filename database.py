@@ -23,8 +23,4 @@ def fetch_data(cur,table):
   cur.execute(f''' SELECT * FROM {table}''')
   for row in cur.fetchall():
       print(row)
-      
-conn,cur = connect('ocr_db.sqlite3')
-dataframe = get_dataset("Extract_data.csv",conn,"Summary")
-summary(cur,conn,"Summary")
-fetch_data(cur,"Summary")
+     
