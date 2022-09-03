@@ -21,6 +21,6 @@ pretrained : True
 poly : False
 show_time : False
 data_limit : 10
-pretrained_OPT: 0
+pretrained_OPT: 1
 
 
